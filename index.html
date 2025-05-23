@@ -3,242 +3,266 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Paper Plane Flight Simulator</title>
+    <title>Fancy Flight Simulator</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background: #87CEEB;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            font-family: Arial, sans-serif;
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: lime;
+            font-family: 'Courier New', monospace;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
         }
-        canvas {
-            border: 1px solid #333;
-            background: #F0F8FF;
+        #resetButton {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 10px;
+            background: rgba(255, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
         }
-        #controls {
-            margin: 10px;
-            color: #333;
-            text-align: center;
+        #resetButton:hover {
+            background: rgba(255, 0, 0, 1);
         }
     </style>
 </head>
 <body>
-    <div id="controls">
-        <p>Use Arrow Keys or WASD: Up/W to increase lift, Down/S to pitch down, Left/A, Right/D to turn.</p>
-        <p>Speed: <span id="speed">0</span> m/s | Altitude: <span id="altitude">0</span> m | Pitch: <span id="pitch">0</span>° | Lift: <span id="lift">0</span>% | Time Survived: <span id="timeSurvived">0</span>s</p>
+    <div id="hud">
+        <div>Altitude: <span id="altitude">0</span> m</div>
+        <div>Speed: <span id="speed">0</span> m/s</div>
+        <div>Pitch: <span id="pitch">0</span>°</div>
+        <div>Yaw: <span id="yaw">0</span>°</div>
+        <div>Roll: <span id="roll">0</span>°</div>
+        <div>Instructions: Click to lock mouse, WASD for pitch/yaw, Arrows for roll/throttle, Space to boost</div>
     </div>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const speedDisplay = document.getElementById('speed');
-        const altitudeDisplay = document.getElementById('altitude');
-        const pitchDisplay = document.getElementById('pitch');
-        const liftDisplay = document.getElementById('lift');
-        const timeSurvivedDisplay = document.getElementById('timeSurvived');
+    <button id="resetButton">Reset</button>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script type="module">
+        // Import PointerLockControls
+        import { PointerLockControls } from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/examples/jsm/controls/PointerLockControls.js';
 
-        // Game state
-        let plane = {
-            x: 200,
-            y: 100,
-            speed: 5, // m/s
-            angle: 0, // radians
-            velocityY: 0,
-            thrust: 5, // Constant thrust
-            liftCoefficient: 1.5,
-            maxLiftCoefficient: 3.0,
-            minLiftCoefficient: 0.5,
-            dragCoefficient: 0.05,
-            mass: 0.1, // kg
-            wingArea: 0.02 // m^2
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Mouse look controls
+        const pointerLockControls = new PointerLockControls(camera, renderer.domElement);
+        scene.add(pointerLockControls.getObject());
+        document.addEventListener('click', () => {
+            pointerLockControls.lock();
+        });
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        // Skybox
+        const skyboxGeometry = new THREE.BoxGeometry(1000, 1000, 1000);
+        const skyboxMaterials = [
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ color: 0xb0e0e6, side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ color: 0x4682b4, side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide })
+        ];
+        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterials);
+        scene.add(skybox);
+
+        // Terrain
+        const terrainGeometry = new THREE.PlaneGeometry(1000, 1000, 50, 50);
+        const terrainMaterial = new THREE.MeshStandardMaterial({ color: 0x228b22, wireframe: false });
+        const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+        terrain.rotation.x = -Math.PI / 2;
+        terrain.position.y = -50;
+        const positionAttribute = terrainGeometry.attributes.position;
+        const terrainHeights = new Float32Array(positionAttribute.count);
+        for (let i = 2; i < positionAttribute.count * 3; i += 3) {
+            const height = Math.random() * 10;
+            positionAttribute.array[i] = height;
+            terrainHeights[i / 3] = height - 50;
+        }
+        positionAttribute.needsUpdate = true;
+        scene.add(terrain);
+
+        // Airplane (detailed model)
+        const airplaneGroup = new THREE.Group();
+        // Fuselage
+        const fuselageGeometry = new THREE.CylinderGeometry(0.8, 0.8, 8, 32);
+        const airplaneMaterial = new THREE.MeshStandardMaterial({ color: 0x4682b4 });
+        const fuselage = new THREE.Mesh(fuselageGeometry, airplaneMaterial);
+        fuselage.rotation.z = Math.PI / 2;
+        airplaneGroup.add(fuselage);
+        // Wings
+        const wingsGeometry = new THREE.BoxGeometry(12, 0.2, 3);
+        const wings = new THREE.Mesh(wingsGeometry, airplaneMaterial);
+        wings.position.y = 0.5;
+        airplaneGroup.add(wings);
+        // Tail wings
+        const tailWingsGeometry = new THREE.BoxGeometry(4, 0.2, 1.5);
+        const tailWings = new THREE.Mesh(tailWingsGeometry, airplaneMaterial);
+        tailWings.position.set(-3.5, 0.5, 0);
+        airplaneGroup.add(tailWings);
+        // Vertical stabilizer
+        const verticalStabGeometry = new THREE.BoxGeometry(0.2, 2, 2);
+        const verticalStab = new THREE.Mesh(verticalStabGeometry, airplaneMaterial);
+        verticalStab.position.set(-3.5, 1.5, 0);
+        airplaneGroup.add(verticalStab);
+        // Cockpit
+        const cockpitGeometry = new THREE.SphereGeometry(0.8, 32, 16, 0, Math.PI);
+        const cockpit = new THREE.Mesh(cockpitGeometry, new THREE.MeshStandardMaterial({ color: 0x333333 }));
+        cockpit.position.set(3.5, 0.5, 0);
+        cockpit.rotation.y = Math.PI;
+        airplaneGroup.add(cockpit);
+        // Engines (simple cylinders)
+        const engineGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1, 16);
+        const engine1 = new THREE.Mesh(engineGeometry, airplaneMaterial);
+        engine1.position.set(0, 0.2, -1.8);
+        airplaneGroup.add(engine1);
+        const engine2 = new THREE.Mesh(engineGeometry, airplaneMaterial);
+        engine2.position.set(0, 0.2, 1.8);
+        airplaneGroup.add(engine2);
+
+        airplaneGroup.position.set(0, 10, 0);
+        scene.add(airplaneGroup);
+
+        // Camera setup (attached to airplane)
+        camera.position.set(0, 2, 5); // Inside cockpit view
+        airplaneGroup.add(camera);
+
+        // Physics and controls
+        let velocity = new THREE.Vector3(0, 0, 0.1);
+        let pitch = 0, yaw = 0, roll = 0;
+        let speed = 0.1;
+        const maxSpeed = 0.5;
+        const gravity = -0.002;
+        const controls = {
+            pitchUp: false,
+            pitchDown: false,
+            yawLeft: false,
+            yawRight: false,
+            rollLeft: false,
+            rollRight: false,
+            accelerate: false,
+            decelerate: false,
+            boost: false
         };
 
-        let terrain = [];
-        let cameraX = 0;
-        const gravity = 9.81; // m/s^2
-        const airDensity = 1.225; // kg/m^3
-        const terrainHeight = 100;
-        const terrainWidth = 50;
-        let keys = {};
-        let gameTime = 0;
-        let gameOver = false;
-
-        // Input handling
-        window.addEventListener('keydown', (e) => {
-            keys[e.key.toLowerCase()] = true;
-            if (e.key === ' ') e.preventDefault();
-        });
-        window.addEventListener('keyup', (e) => {
-            keys[e.key.toLowerCase()] = false;
+        // Keyboard controls
+        document.addEventListener('keydown', (event) => {
+            switch (event.key) {
+                case 'w': controls.pitchUp = true; break;
+                case 's': controls.pitchDown = true; break;
+                case 'a': controls.yawLeft = true; break;
+                case 'd': controls.yawRight = true; break;
+                case 'ArrowLeft': controls.rollLeft = true; break;
+                case 'ArrowRight': controls.rollRight = true; break;
+                case 'ArrowUp': controls.accelerate = true; break;
+                case 'ArrowDown': controls.decelerate = true; break;
+                case ' ': controls.boost = true; break;
+            }
         });
 
-        // Terrain generation
-        function generateTerrain() {
-            terrain = [];
-            let lastHeight = canvas.height - terrainHeight;
-            for (let x = 0; x < canvas.width * 2; x += terrainWidth) {
-                let height = lastHeight + (Math.random() - 0.5) * 50;
-                height = Math.max(canvas.height - terrainHeight * 2, Math.min(canvas.height - 50, height));
-                terrain.push({ x, height });
-                lastHeight = height;
+        document.addEventListener('keyup', (event) => {
+            switch (event.key) {
+                case 'w': controls.pitchUp = false; break;
+                case 's': controls.pitchDown = false; break;
+                case 'a': controls.yawLeft = false; break;
+                case 'd': controls.yawRight = false; break;
+                case 'ArrowLeft': controls.rollLeft = false; break;
+                case 'ArrowRight': controls.rollRight = false; break;
+                case 'ArrowUp': controls.accelerate = false; break;
+                case 'ArrowDown': controls.decelerate = false; break;
+                case ' ': controls.boost = false; break;
             }
-        }
+        });
 
-        // Reset game
-        function resetGame() {
-            plane = {
-                x: 200,
-                y: 100,
-                speed: 5,
-                angle: 0,
-                velocityY: 0,
-                thrust: 5,
-                liftCoefficient: 1.5,
-                maxLiftCoefficient: 3.0,
-                minLiftCoefficient: 0.5,
-                dragCoefficient: 0.05,
-                mass: 0.1,
-                wingArea: 0.02
-            };
-            cameraX = 0;
-            gameTime = 0;
-            gameOver = false;
-            generateTerrain();
-        }
+        // Reset button
+        const resetButton = document.getElementById('resetButton');
+        resetButton.addEventListener('click', () => {
+            airplaneGroup.position.set(0, 10, 0);
+            airplaneGroup.rotation.set(0, 0, 0);
+            velocity.set(0, 0, 0.1);
+            pitch = 0;
+            yaw = 0;
+            roll = 0;
+            speed = 0.1;
+            pointerLockControls.getObject().position.set(0, 2, 5);
+        });
 
-        // Physics update
-        function updatePhysics(dt) {
-            if (gameOver) return;
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
 
-            // Controls
-            let pitchRate = 0.02;
-            if (keys['arrowdown'] || keys['s']) plane.angle -= pitchRate;
-            let turnRate = 0.015;
-            if (keys['arrowleft'] || keys['a']) plane.angle -= turnRate;
-            if (keys['arrowright'] || keys['d']) plane.angle += turnRate;
-            plane.angle = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, plane.angle));
+            // Update controls
+            if (controls.pitchUp) pitch += 0.02;
+            if (controls.pitchDown) pitch -= 0.02;
+            if (controls.yawLeft) yaw += 0.02;
+            if (controls.yawRight) yaw -= 0.02;
+            if (controls.rollLeft) roll += 0.02;
+            if (controls.rollRight) roll -= 0.02;
+            if (controls.accelerate) speed = Math.min(speed + 0.005, maxSpeed);
+            if (controls.decelerate) speed = Math.max(speed - 0.005, 0);
+            if (controls.boost) speed = Math.min(speed + 0.01, maxSpeed);
 
-            // Lift control
-            if (keys['arrowup'] || keys['w']) {
-                plane.liftCoefficient = Math.min(plane.liftCoefficient + 0.05, plane.maxLiftCoefficient);
-            } else {
-                plane.liftCoefficient = Math.max(plane.liftCoefficient - 0.03, plane.minLiftCoefficient);
-            }
+            // Apply rotations
+            airplaneGroup.rotation.order = 'ZYX';
+            airplaneGroup.rotation.x = pitch;
+            airplaneGroup.rotation.y = yaw;
+            airplaneGroup.rotation.z = roll;
 
-            // Lift force
-            let lift = 0.5 * airDensity * plane.speed * plane.speed * plane.wingArea * plane.liftCoefficient * Math.cos(plane.angle);
-            let drag = 0.5 * airDensity * plane.speed * plane.speed * plane.wingArea * plane.dragCoefficient;
+            // Update velocity based on orientation
+            const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(airplaneGroup.quaternion);
+            velocity.copy(direction.multiplyScalar(speed));
 
-            // Net forces
-            let forceX = plane.thrust * Math.cos(plane.angle) - drag * Math.cos(plane.angle);
-            let forceY = lift - plane.mass * gravity - plane.thrust * Math.sin(plane.angle) + drag * Math.sin(plane.angle);
+            // Apply gravity
+            velocity.y += gravity;
 
-            // Update velocity and position
-            plane.speed += (forceX / plane.mass) * dt;
-            plane.speed = Math.max(0, plane.speed); // Prevent negative speed
-            plane.velocityY += (forceY / plane.mass) * dt;
-            plane.x += plane.speed * Math.cos(plane.angle) * dt;
-            plane.y += (plane.velocityY + plane.speed * Math.sin(plane.angle)) * dt;
+            // Update position
+            airplaneGroup.position.add(velocity);
 
-            // Camera follows plane
-            cameraX = plane.x - 200;
-
-            // Terrain collision
-            let terrainY = getTerrainHeight(plane.x);
-            if (plane.y > terrainY) {
-                plane.y = terrainY;
-                plane.velocityY = 0;
-                plane.speed *= 0.8; // Friction
-                // Crash detection
-                if (plane.speed > 7 || Math.abs(plane.velocityY) > 5) {
-                    gameOver = true;
-                    alert(`Crashed! Time Survived: ${gameTime.toFixed(1)}s. Press OK to restart.`);
-                    resetGame();
-                }
+            // Terrain collision detection
+            const gridX = Math.floor((airplaneGroup.position.x + 500) / 20);
+            const gridZ = Math.floor((airplaneGroup.position.z + 500) / 20);
+            const vertexIndex = gridZ * 51 + gridX;
+            const terrainHeight = vertexIndex >= 0 && vertexIndex < terrainHeights.length ? terrainHeights[vertexIndex] : -50;
+            if (airplaneGroup.position.y < terrainHeight + 2) {
+                airplaneGroup.position.y = terrainHeight + 2;
+                velocity.y = Math.max(velocity.y, 0);
             }
 
-            // Update terrain if needed
-            if (terrain[terrain.length - 1].x < plane.x + canvas.width) {
-                let lastHeight = terrain[terrain.length - 1].height;
-                let newX = terrain[terrain.length - 1].x + terrainWidth;
-                let height = lastHeight + (Math.random() - 0.5) * 50;
-                height = Math.max(canvas.height - terrainHeight * 2, Math.min(canvas.height - 50, height));
-                terrain.push({ x: newX, height });
-                if (terrain[0].x < cameraX - canvas.width) terrain.shift();
-            }
+            // Update HUD
+            document.getElementById('altitude').textContent = airplaneGroup.position.y.toFixed(1);
+            document.getElementById('speed').textContent = (speed * 100).toFixed(1);
+            document.getElementById('pitch').textContent = (pitch * 180 / Math.PI).toFixed(1);
+            document.getElementById('yaw').textContent = (yaw * 180 / Math.PI).toFixed(1);
+            document.getElementById('roll').textContent = (roll * 180 / Math.PI).toFixed(1);
 
-            // Update game time
-            gameTime += dt;
+            renderer.render(scene, camera);
         }
 
-        // Get terrain height at x
-        function getTerrainHeight(x) {
-            for (let i = 0; i < terrain.length - 1; i++) {
-                if (x >= terrain[i].x && x <= terrain[i + 1].x) {
-                    let t = (x - terrain[i].x) / (terrain[i + 1].x - terrain[i].x);
-                    return terrain[i].height + t * (terrain[i + 1].height - terrain[i].height);
-                }
-            }
-            return canvas.height - terrainHeight;
-        }
+        animate();
 
-        // Draw plane
-        function drawPlane() {
-            ctx.save();
-            ctx.translate(plane.x - cameraX, plane.y);
-            ctx.rotate(plane.angle);
-            ctx.fillStyle = gameOver ? '#888888' : '#FF4444';
-            ctx.beginPath();
-            ctx.moveTo(20, 0);
-            ctx.lineTo(-10, -10);
-            ctx.lineTo(-10, 10);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-        }
-
-        // Draw terrain
-        function drawTerrain() {
-            ctx.fillStyle = '#228B22';
-            ctx.beginPath();
-            ctx.moveTo(terrain[0].x - cameraX, canvas.height);
-            terrain.forEach(p => ctx.lineTo(p.x - cameraX, p.height));
-            ctx.lineTo(terrain[terrain.length - 1].x - cameraX, canvas.height);
-            ctx.closePath();
-            ctx.fill();
-        }
-
-        // Game loop
-        let lastTime = performance.now();
-        function gameLoop(time) {
-            let dt = (time - lastTime) / 1000;
-            lastTime = time;
-
-            updatePhysics(dt);
-
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Draw
-            drawTerrain();
-            drawPlane();
-
-            // Update UI
-            speedDisplay.textContent = plane.speed.toFixed(1);
-            altitudeDisplay.textContent = (canvas.height - plane.y).toFixed(1);
-            pitchDisplay.textContent = (plane.angle * 180 / Math.PI).toFixed(1);
-            liftDisplay.textContent = ((plane.liftCoefficient / plane.maxLiftCoefficient) * 100).toFixed(0);
-            timeSurvivedDisplay.textContent = gameTime.toFixed(1);
-
-            requestAnimationFrame(gameLoop);
-        }
-
-        // Start game
-        generateTerrain();
-        requestAnimationFrame(gameLoop);
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
