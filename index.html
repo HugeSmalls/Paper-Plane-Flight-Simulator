@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paper Plane Flight Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #87CEEB;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid #333;
+            background: #F0F8FF;
+        }
+        #controls {
+            margin: 10px;
+            color: #333;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <p>Use Arrow Keys or WASD: Up/W to increase lift, Down/S to pitch down, Left/A, Right/D to turn.</p>
+        <p>Speed: <span id="speed">0</span> m/s | Altitude: <span id="altitude">0</span> m | Pitch: <span id="pitch">0</span>° | Lift: <span id="lift">0</span>% | Time Survived: <span id="timeSurvived">0</span>s</p>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const speedDisplay = document.getElementById('speed');
+        const altitudeDisplay = document.getElementById('altitude');
+        const pitchDisplay = document.getElementById('pitch');
+        const liftDisplay = document.getElementById('lift');
+        const timeSurvivedDisplay = document.getElementById('timeSurvived');
+
+        // Game state
+        let plane = {
+            x: 200,
+            y: 100,
+            speed: 5, // m/s
+            angle: 0, // radians
+            velocityY: 0,
+            thrust: 5, // Constant thrust
+            liftCoefficient: 1.5,
+            maxLiftCoefficient: 3.0,
+            minLiftCoefficient: 0.5,
+            dragCoefficient: 0.05,
+            mass: 0.1, // kg
+            wingArea: 0.02 // m^2
+        };
+
+        let terrain = [];
+        let cameraX = 0;
+        const gravity = 9.81; // m/s^2
+        const airDensity = 1.225; // kg/m^3
+        const terrainHeight = 100;
+        const terrainWidth = 50;
+        let keys = {};
+        let gameTime = 0;
+        let gameOver = false;
+
+        // Input handling
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === ' ') e.preventDefault();
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // Terrain generation
+        function generateTerrain() {
+            terrain = [];
+            let lastHeight = canvas.height - terrainHeight;
+            for (let x = 0; x < canvas.width * 2; x += terrainWidth) {
+                let height = lastHeight + (Math.random() - 0.5) * 50;
+                height = Math.max(canvas.height - terrainHeight * 2, Math.min(canvas.height - 50, height));
+                terrain.push({ x, height });
+                lastHeight = height;
+            }
+        }
+
+        // Reset game
+        function resetGame() {
+            plane = {
+                x: 200,
+                y: 100,
+                speed: 5,
+                angle: 0,
+                velocityY: 0,
+                thrust: 5,
+                liftCoefficient: 1.5,
+                maxLiftCoefficient: 3.0,
+                minLiftCoefficient: 0.5,
+                dragCoefficient: 0.05,
+                mass: 0.1,
+                wingArea: 0.02
+            };
+            cameraX = 0;
+            gameTime = 0;
+            gameOver = false;
+            generateTerrain();
+        }
+
+        // Physics update
+        function updatePhysics(dt) {
+            if (gameOver) return;
+
+            // Controls
+            let pitchRate = 0.02;
+            if (keys['arrowdown'] || keys['s']) plane.angle -= pitchRate;
+            let turnRate = 0.015;
+            if (keys['arrowleft'] || keys['a']) plane.angle -= turnRate;
+            if (keys['arrowright'] || keys['d']) plane.angle += turnRate;
+            plane.angle = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, plane.angle));
+
+            // Lift control
+            if (keys['arrowup'] || keys['w']) {
+                plane.liftCoefficient = Math.min(plane.liftCoefficient + 0.05, plane.maxLiftCoefficient);
+            } else {
+                plane.liftCoefficient = Math.max(plane.liftCoefficient - 0.03, plane.minLiftCoefficient);
+            }
+
+            // Lift force
+            let lift = 0.5 * airDensity * plane.speed * plane.speed * plane.wingArea * plane.liftCoefficient * Math.cos(plane.angle);
+            let drag = 0.5 * airDensity * plane.speed * plane.speed * plane.wingArea * plane.dragCoefficient;
+
+            // Net forces
+            let forceX = plane.thrust * Math.cos(plane.angle) - drag * Math.cos(plane.angle);
+            let forceY = lift - plane.mass * gravity - plane.thrust * Math.sin(plane.angle) + drag * Math.sin(plane.angle);
+
+            // Update velocity and position
+            plane.speed += (forceX / plane.mass) * dt;
+            plane.speed = Math.max(0, plane.speed); // Prevent negative speed
+            plane.velocityY += (forceY / plane.mass) * dt;
+            plane.x += plane.speed * Math.cos(plane.angle) * dt;
+            plane.y += (plane.velocityY + plane.speed * Math.sin(plane.angle)) * dt;
+
+            // Camera follows plane
+            cameraX = plane.x - 200;
+
+            // Terrain collision
+            let terrainY = getTerrainHeight(plane.x);
+            if (plane.y > terrainY) {
+                plane.y = terrainY;
+                plane.velocityY = 0;
+                plane.speed *= 0.8; // Friction
+                // Crash detection
+                if (plane.speed > 7 || Math.abs(plane.velocityY) > 5) {
+                    gameOver = true;
+                    alert(`Crashed! Time Survived: ${gameTime.toFixed(1)}s. Press OK to restart.`);
+                    resetGame();
+                }
+            }
+
+            // Update terrain if needed
+            if (terrain[terrain.length - 1].x < plane.x + canvas.width) {
+                let lastHeight = terrain[terrain.length - 1].height;
+                let newX = terrain[terrain.length - 1].x + terrainWidth;
+                let height = lastHeight + (Math.random() - 0.5) * 50;
+                height = Math.max(canvas.height - terrainHeight * 2, Math.min(canvas.height - 50, height));
+                terrain.push({ x: newX, height });
+                if (terrain[0].x < cameraX - canvas.width) terrain.shift();
+            }
+
+            // Update game time
+            gameTime += dt;
+        }
+
+        // Get terrain height at x
+        function getTerrainHeight(x) {
+            for (let i = 0; i < terrain.length - 1; i++) {
+                if (x >= terrain[i].x && x <= terrain[i + 1].x) {
+                    let t = (x - terrain[i].x) / (terrain[i + 1].x - terrain[i].x);
+                    return terrain[i].height + t * (terrain[i + 1].height - terrain[i].height);
+                }
+            }
+            return canvas.height - terrainHeight;
+        }
+
+        // Draw plane
+        function drawPlane() {
+            ctx.save();
+            ctx.translate(plane.x - cameraX, plane.y);
+            ctx.rotate(plane.angle);
+            ctx.fillStyle = gameOver ? '#888888' : '#FF4444';
+            ctx.beginPath();
+            ctx.moveTo(20, 0);
+            ctx.lineTo(-10, -10);
+            ctx.lineTo(-10, 10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Draw terrain
+        function drawTerrain() {
+            ctx.fillStyle = '#228B22';
+            ctx.beginPath();
+            ctx.moveTo(terrain[0].x - cameraX, canvas.height);
+            terrain.forEach(p => ctx.lineTo(p.x - cameraX, p.height));
+            ctx.lineTo(terrain[terrain.length - 1].x - cameraX, canvas.height);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Game loop
+        let lastTime = performance.now();
+        function gameLoop(time) {
+            let dt = (time - lastTime) / 1000;
+            lastTime = time;
+
+            updatePhysics(dt);
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw
+            drawTerrain();
+            drawPlane();
+
+            // Update UI
+            speedDisplay.textContent = plane.speed.toFixed(1);
+            altitudeDisplay.textContent = (canvas.height - plane.y).toFixed(1);
+            pitchDisplay.textContent = (plane.angle * 180 / Math.PI).toFixed(1);
+            liftDisplay.textContent = ((plane.liftCoefficient / plane.maxLiftCoefficient) * 100).toFixed(0);
+            timeSurvivedDisplay.textContent = gameTime.toFixed(1);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game
+        generateTerrain();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
